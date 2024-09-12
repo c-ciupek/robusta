@@ -57,6 +57,7 @@ pub use robusta_codegen::Signature;
 pub use safe::*;
 pub use unchecked::*;
 
+mod config;
 pub mod field;
 pub mod safe;
 pub mod unchecked;
@@ -246,7 +247,7 @@ where
     Ok: Signature,
     Err: Signature,
 {
-    const SIG_TYPE: &'static str = env!("RESULT_JNI_SIGNATURE");
+    const SIG_TYPE: &'static str = config::RESULT_JNI_SIGNATURE;
 }
 
 impl<'env, Ok, Err> JClassAccess<'env> for core::result::Result<Ok, Err>
