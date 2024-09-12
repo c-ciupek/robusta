@@ -146,6 +146,7 @@ pub trait JClassAccess<'env>: Signature {
     }
 }
 
+#[macro_export]
 macro_rules! generate_get_jclass {
     () => {
         fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env> {
