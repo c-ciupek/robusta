@@ -11,11 +11,14 @@
 //! **These functions *will* panic should any conversion fail.**
 //!
 
-use jni::objects::{JList, JObject, JString, JValue};
+use std::sync::OnceLock;
+
+use jni::objects::{JFieldID, JList, JMethodID, JObject, JString, JValue};
+use jni::signature::{Primitive, ReturnType};
 use jni::sys::{jboolean, jbooleanArray, jchar, jobject, jstring};
 use jni::JNIEnv;
 
-use crate::convert::{JavaValue, Signature};
+use crate::convert::{JClassAccess, JavaValue, Signature};
 
 pub use robusta_codegen::{FromJavaValue, IntoJavaValue};
 
@@ -84,10 +87,6 @@ where
     fn from(t: Self::Source, _: &'borrow JNIEnv<'env>) -> Self {
         t
     }
-}
-
-impl Signature for String {
-    const SIG_TYPE: &'static str = "Ljava/lang/String;";
 }
 
 impl<'env> IntoJavaValue<'env> for String {
@@ -177,10 +176,6 @@ impl<'env: 'borrow, 'borrow> FromJavaValue<'env, 'borrow> for Box<[bool]> {
     }
 }
 
-impl<T> Signature for Vec<T> {
-    const SIG_TYPE: &'static str = "Ljava/util/ArrayList;";
-}
-
 impl<'env, T> IntoJavaValue<'env> for Vec<T>
 where
     T: IntoJavaValue<'env>,
@@ -188,13 +183,17 @@ where
     type Target = jobject;
 
     fn into(self, env: &JNIEnv<'env>) -> Self::Target {
+        static CTOR_ID: OnceLock<JMethodID> = OnceLock::new();
+        let ctor_id = CTOR_ID.get_or_init(|| Self::get_method_id(env, "<init>", "(I)V"));
+
         let obj = env
-            .new_object(
-                "java/util/ArrayList",
-                "(I)V",
+            .new_object_unchecked(
+                Self::get_jclass(env),
+                *ctor_id,
                 &[JValue::Int(self.len() as i32)],
             )
             .unwrap();
+
         let list = JList::from_env(&env, obj).unwrap();
 
         self.into_iter()
@@ -232,5 +231,103 @@ where
 
     fn into(self, env: &JNIEnv<'env>) -> Self::Target {
         self.map(|s| IntoJavaValue::into(s, env)).unwrap()
+    }
+}
+
+impl<'env, T, U> IntoJavaValue<'env> for Option<T>
+where
+    T: IntoJavaValue<'env, Target = U>,
+    U: JavaValue<'env>,
+{
+    type Target = JObject<'env>;
+
+    fn into(self, env: &JNIEnv<'env>) -> Self::Target {
+        if self.is_none() {
+            JObject::null()
+        } else {
+            IntoJavaValue::into(self.unwrap(), &env).autobox(env)
+        }
+    }
+}
+
+impl<'env: 'borrow, 'borrow, T, U> FromJavaValue<'env, 'borrow> for Option<T>
+where
+    T: FromJavaValue<'env, 'borrow, Source = U>,
+    U: JavaValue<'env>,
+{
+    type Source = JObject<'env>;
+
+    fn from(s: Self::Source, env: &'borrow JNIEnv<'env>) -> Self {
+        if s.is_null() {
+            None
+        } else {
+            Some(T::from(U::unbox(s, env), env))
+        }
+    }
+}
+
+impl<'env, Ok, Err> IntoJavaValue<'env> for core::result::Result<Ok, Err>
+where
+    Ok: IntoJavaValue<'env>,
+    Err: IntoJavaValue<'env>,
+{
+    type Target = JObject<'env>;
+    fn into(self, env: &JNIEnv<'env>) -> Self::Target {
+        static CTOR_ID: OnceLock<JMethodID> = OnceLock::new();
+        let ctor_id =
+            CTOR_ID.get_or_init(|| Self::get_method_id(env, "<init>", "(BLjava/lang/Object;)V"));
+        let (tag, value) = match self {
+            Ok(ok) => {
+                let ok_value = Ok::Target::autobox(Ok::into(ok, env), env);
+                (0i8, ok_value)
+            }
+            Err(err) => {
+                let err_value = Err::Target::autobox(Err::into(err, env), env);
+                (1i8, err_value)
+            }
+        };
+        env.new_object_unchecked(
+            Self::get_jclass(env),
+            *ctor_id,
+            &[JValue::Byte(tag), JValue::Object(value)],
+        )
+        .unwrap()
+    }
+}
+
+impl<'env: 'borrow, 'borrow, Ok, Err> FromJavaValue<'env, 'borrow> for core::result::Result<Ok, Err>
+where
+    Ok: FromJavaValue<'env, 'borrow>,
+    Err: FromJavaValue<'env, 'borrow>,
+{
+    type Source = JObject<'env>;
+    fn from(s: Self::Source, env: &'borrow JNIEnv<'env>) -> Self {
+        static TAG_FIELD_ID: OnceLock<JFieldID> = OnceLock::new();
+        static VALUE_FIELD_ID: OnceLock<JFieldID> = OnceLock::new();
+        let tag_field_id = TAG_FIELD_ID.get_or_init(|| Self::get_field_id(env, "tag", "B"));
+        let tag = env
+            .get_field_unchecked(s, *tag_field_id, ReturnType::Primitive(Primitive::Byte))
+            .unwrap()
+            .b()
+            .unwrap();
+        let value_field_id =
+            VALUE_FIELD_ID.get_or_init(|| Self::get_field_id(env, "value", "Ljava/lang/Object;"));
+        let value = env
+            .get_field_unchecked(s, *value_field_id, ReturnType::Object)
+            .unwrap()
+            .l()
+            .unwrap();
+
+        match tag {
+            0 => {
+                let ok = Ok::from(Ok::Source::unbox(value, env), env);
+                core::result::Result::Ok(ok)
+            }
+            1 => {
+                let err = Err::from(Err::Source::unbox(value, env), env);
+                core::result::Result::Err(err)
+            }
+            _ => unreachable!(),
+        }
     }
 }

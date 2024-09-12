@@ -40,9 +40,13 @@
 
 use std::convert::TryFrom;
 use std::str::FromStr;
+use std::sync::OnceLock;
 
 use jni::errors::Error;
-use jni::objects::{JObject, JString, JValue};
+use jni::objects::{
+    GlobalRef, JClass, JFieldID, JMethodID, JObject, JStaticFieldID, JStaticMethodID, JString,
+    JValue,
+};
 use jni::signature::ReturnType;
 use jni::sys::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort};
 use jni::JNIEnv;
@@ -119,6 +123,41 @@ jvalue_types! {
     jshort: Short (S) [shortValue]
 }
 
+pub trait JClassAccess<'env>: Signature {
+    fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env>;
+    fn init_global_class_ref(env: &JNIEnv<'env>) -> GlobalRef {
+        let class_name = &<Self as Signature>::SIG_TYPE[1..<Self as Signature>::SIG_TYPE.len() - 1];
+        let class = env.find_class(class_name).unwrap();
+        env.new_global_ref(class).unwrap()
+    }
+    fn get_field_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JFieldID {
+        env.get_field_id(Self::get_jclass(env), name, sig).unwrap()
+    }
+    fn get_static_field_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JStaticFieldID {
+        env.get_static_field_id(Self::get_jclass(env), name, sig)
+            .unwrap()
+    }
+    fn get_method_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JMethodID {
+        env.get_method_id(Self::get_jclass(env), name, sig).unwrap()
+    }
+    fn get_static_method_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JStaticMethodID {
+        env.get_static_method_id(Self::get_jclass(env), name, sig)
+            .unwrap()
+    }
+}
+
+macro_rules! generate_get_jclass {
+    () => {
+        fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env> {
+            static JCLASS_REF: OnceLock<GlobalRef> = OnceLock::new();
+            Into::into(
+                env.new_local_ref(JCLASS_REF.get_or_init(|| Self::init_global_class_ref(env)))
+                    .unwrap(),
+            )
+        }
+    };
+}
+
 impl Signature for () {
     const SIG_TYPE: &'static str = "V";
 }
@@ -155,8 +194,24 @@ impl<'env> JavaValue<'env> for jobject {
     }
 }
 
+impl<'env> JClassAccess<'env> for JObject<'env> {
+    generate_get_jclass!();
+}
+
+impl Signature for String {
+    const SIG_TYPE: &'static str = "Ljava/lang/String;";
+}
+
+impl<'env> JClassAccess<'env> for String {
+    generate_get_jclass!();
+}
+
 impl<'env> Signature for JString<'env> {
     const SIG_TYPE: &'static str = "Ljava/lang/String;";
+}
+
+impl<'env> JClassAccess<'env> for JString<'env> {
+    generate_get_jclass!();
 }
 
 impl<'env> JavaValue<'env> for JString<'env> {
@@ -169,8 +224,36 @@ impl<'env> JavaValue<'env> for JString<'env> {
     }
 }
 
+impl<T: Signature> Signature for Vec<T> {
+    const SIG_TYPE: &'static str = "Ljava/util/ArrayList;";
+}
+
+impl<'env, T: Signature> JClassAccess<'env> for Vec<T> {
+    generate_get_jclass!();
+}
+
 impl<T: Signature> Signature for jni::errors::Result<T> {
     const SIG_TYPE: &'static str = <T as Signature>::SIG_TYPE;
+}
+
+impl<'env, T: Signature> Signature for Option<T> {
+    const SIG_TYPE: &'static str = T::SIG_TYPE;
+}
+
+impl<'env, Ok, Err> Signature for core::result::Result<Ok, Err>
+where
+    Ok: Signature,
+    Err: Signature,
+{
+    const SIG_TYPE: &'static str = env!("RESULT_JNI_SIGNATURE");
+}
+
+impl<'env, Ok, Err> JClassAccess<'env> for core::result::Result<Ok, Err>
+where
+    Ok: Signature,
+    Err: Signature,
+{
+    generate_get_jclass!();
 }
 
 pub struct JValueWrapper<'a>(pub JValue<'a>);
