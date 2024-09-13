@@ -59,12 +59,12 @@ pub use unchecked::*;
 
 mod config;
 pub mod field;
-pub mod safe;
-mod tuple;
-pub mod unchecked;
-
 #[cfg(feature = "jni_result")]
 mod result;
+pub mod safe;
+#[cfg(feature = "jni_tuple")]
+mod tuple;
+pub mod unchecked;
 
 /// A trait for types that are ffi-safe to use with JNI. It is implemented for primitives, [JObject](jni::objects::JObject) and [jobject](jni::sys::jobject).
 /// Users that want automatic conversion should instead implement [FromJavaValue], [IntoJavaValue] and/or [TryFromJavaValue], [TryIntoJavaValue]
@@ -223,7 +223,7 @@ macro_rules! impl_tuple_signature {
 pub(crate) use impl_tuple_signature;
 
 macro_rules! impl_tuple_complete {
-    ($sig_type:expr, $(($T:ident, $t:ident, $idx:tt)),+) => {
+    ($sig_type:expr, $(($T:ident, $t:ident, $idx:tt)),+ $(,)?) => {
         crate::convert::impl_tuple_signature!($sig_type, $($T,)+);
         crate::convert::safe::impl_tuple!($(($T, $t, $idx)),+);
         crate::convert::unchecked::impl_tuple!($(($T, $t, $idx)),+);

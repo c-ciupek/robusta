@@ -5,7 +5,7 @@ use super::{
     TryIntoJavaValue,
 };
 use jni::errors::Result;
-use jni::objects::{JFieldID, JMethodID, JObject, JValue};
+use jni::objects::{GlobalRef, JClass, JFieldID, JMethodID, JObject, JValue};
 use jni::signature::{JavaType, Primitive, ReturnType, TypeSignature};
 use jni::JNIEnv;
 use std::str::FromStr;
