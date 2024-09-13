@@ -1,5 +1,7 @@
 use std::sync::OnceLock;
 
+use crate::{impl_jclass_access, impl_signature};
+
 use super::{
     config, FromJavaValue, IntoJavaValue, JClassAccess, JavaValue, Signature, TryFromJavaValue,
     TryIntoJavaValue,
@@ -10,8 +12,8 @@ use jni::signature::{JavaType, Primitive, ReturnType, TypeSignature};
 use jni::JNIEnv;
 use std::str::FromStr;
 
-crate::impl_signature!(config::RESULT_JNI_SIGNATURE, core::result::Result<Ok, Err>, Ok, Err);
-crate::impl_jclass_access!(core::result::Result<Ok, Err>, Ok, Err);
+impl_signature!(config::RESULT_JNI_SIGNATURE, core::result::Result<Ok, Err>, Ok, Err);
+impl_jclass_access!(core::result::Result<Ok, Err>, Ok, Err);
 
 // safe implementation
 impl<'env, Ok, Err> IntoJavaValue<'env> for core::result::Result<Ok, Err>

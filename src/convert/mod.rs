@@ -93,8 +93,16 @@ pub trait Signature {
 }
 
 #[macro_export]
-macro_rules! impl_signature_get_methods {
-    () => {
+macro_rules! impl_signature {
+
+    ($sig_type:expr, $type:ty $(,$lifetimes:lifetime)* $(,$generics:ident)* $(,)?) => {
+        impl<$($lifetimes),* $($generics: Signature),*> Signature for $type {
+            const SIG_TYPE: &'static str = $sig_type;
+            impl_signature!(func);
+        }
+    };
+
+    (func) => {
         fn get_java_type() -> JavaType {
             static JAVA_TYPE: OnceLock<JavaType> = OnceLock::new();
             JAVA_TYPE
@@ -113,17 +121,6 @@ macro_rules! impl_signature_get_methods {
             RETURN_TYPE
                 .get_or_init(|| ReturnType::from_str(<Self as Signature>::SIG_TYPE).unwrap())
                 .clone()
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! impl_signature {
-
-    ($sig_type:expr, $type:ty $(,$lifetimes:lifetime)* $(,$generics:ident)* $(,)?) => {
-        impl<$($lifetimes),* $($generics: Signature),*> Signature for $type {
-            const SIG_TYPE: &'static str = $sig_type;
-            crate::impl_signature_get_methods!();
         }
     };
 }
@@ -296,7 +293,7 @@ where
     T: Signature,
 {
     const SIG_TYPE: &'static str = <T as Signature>::SIG_TYPE;
-    crate::impl_signature_get_methods!();
+    impl_signature!(func);
 }
 
 pub struct JValueWrapper<'a>(pub JValue<'a>);
