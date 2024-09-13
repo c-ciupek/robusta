@@ -19,8 +19,7 @@
 use std::sync::OnceLock;
 
 use jni::errors::{Error, Result};
-use jni::objects::{JFieldID, JList, JMethodID, JObject, JString, JValue};
-use jni::signature::{Primitive, ReturnType};
+use jni::objects::{JList, JMethodID, JObject, JString, JValue};
 use jni::sys::{jboolean, jbooleanArray, jbyteArray, jchar, jobject};
 use jni::JNIEnv;
 
@@ -174,10 +173,6 @@ impl<'env: 'borrow, 'borrow> TryFromJavaValue<'env, 'borrow> for char {
     }
 }
 
-impl Signature for Box<[bool]> {
-    const SIG_TYPE: &'static str = "[Z";
-}
-
 impl<'env> TryIntoJavaValue<'env> for Box<[bool]> {
     type Target = jbooleanArray;
 
@@ -253,10 +248,6 @@ where
     }
 }
 
-impl Signature for Box<[u8]> {
-    const SIG_TYPE: &'static str = "[B";
-}
-
 impl<'env> TryIntoJavaValue<'env> for Box<[u8]> {
     type Target = jbyteArray;
 
@@ -322,65 +313,60 @@ where
     }
 }
 
-impl<'env, Ok, Err> TryIntoJavaValue<'env> for core::result::Result<Ok, Err>
-where
-    Ok: TryIntoJavaValue<'env>,
-    Err: TryIntoJavaValue<'env>,
-{
-    type Target = JObject<'env>;
-    fn try_into(self, env: &JNIEnv<'env>) -> Result<Self::Target> {
-        static CTOR_ID: OnceLock<JMethodID> = OnceLock::new();
-        let ctor_id =
-            CTOR_ID.get_or_init(|| Self::get_method_id(env, "<init>", "(BLjava/lang/Object;)V"));
-        let (tag, value) = match self {
-            Ok(ok) => {
-                let ok_value = Ok::Target::autobox(Ok::try_into(ok, env)?, env);
-                (0i8, ok_value)
+macro_rules! impl_tuple {
+    ($(($T:ident, $t:ident, $idx:tt)),+ $(,)?) => {
+
+        impl<'env, $($T),+> TryIntoJavaValue<'env> for ($($T,)+)
+        where
+            $($T: TryIntoJavaValue<'env>,)+
+        {
+            type Target = JObject<'env>;
+
+            fn try_into(self, env: &JNIEnv<'env>) -> Result<Self::Target> {
+                static CTOR_ID: OnceLock<JMethodID> = OnceLock::new();
+                let ctor_id = CTOR_ID.get_or_init(|| {
+                    let param_sig = "Ljava/lang/Object;".repeat(super::count_tuple_elements!($($T),+));
+                    Self::get_method_id(env, "<init>", &format!("({})V", param_sig))
+                });
+
+
+                let java_tuple = env.new_object_unchecked(
+                    Self::get_jclass(env),
+                    *ctor_id,
+                    &[
+                        $(JValue::Object($T::Target::autobox($T::try_into(self.$idx, env)?, env))),+
+                    ],
+                )?;
+                Ok(java_tuple)
             }
-            Err(err) => {
-                let err_value = Err::Target::autobox(Err::try_into(err, env)?, env);
-                (1i8, err_value)
+        }
+
+        impl<'env: 'borrow, 'borrow, $($T),+> TryFromJavaValue<'env, 'borrow> for ($($T,)+)
+        where
+            $($T: TryFromJavaValue<'env, 'borrow>,)+
+        {
+            type Source = JObject<'env>;
+
+            fn try_from(s: Self::Source, env: &'borrow JNIEnv<'env>) -> Result<Self> {
+                $(
+                    let $t = {
+                        static FIELD_ID: OnceLock<JFieldID> = OnceLock::new();
+                        let field_id = FIELD_ID.get_or_init(|| Self::get_field_id(env, stringify!($t), <$T as Signature>::SIG_TYPE));
+
+                        $T::try_from(
+                            $T::Source::unbox(
+                                env.get_field_unchecked(s, *field_id, Self::get_return_type())?.l()?,
+                                env,
+                            ),
+                            env,
+                        )?
+                    };
+                )+
+
+                Ok(($($t,)+))
             }
-        };
-        let result_object = env.new_object_unchecked(
-            Self::get_jclass(env),
-            *ctor_id,
-            &[JValue::Byte(tag), JValue::Object(value)],
-        )?;
-        Ok(result_object)
-    }
+        }
+    };
 }
 
-impl<'env: 'borrow, 'borrow, Ok, Err> TryFromJavaValue<'env, 'borrow>
-    for core::result::Result<Ok, Err>
-where
-    Ok: TryFromJavaValue<'env, 'borrow>,
-    Err: TryFromJavaValue<'env, 'borrow>,
-{
-    type Source = JObject<'env>;
-    fn try_from(s: Self::Source, env: &'borrow JNIEnv<'env>) -> Result<Self> {
-        static TAG_FIELD_ID: OnceLock<JFieldID> = OnceLock::new();
-        static VALUE_FIELD_ID: OnceLock<JFieldID> = OnceLock::new();
-        let tag_field_id = TAG_FIELD_ID.get_or_init(|| Self::get_field_id(env, "tag", "B"));
-        let tag = env
-            .get_field_unchecked(s, *tag_field_id, ReturnType::Primitive(Primitive::Byte))?
-            .b()?;
-        let value_field_id =
-            VALUE_FIELD_ID.get_or_init(|| Self::get_field_id(env, "value", "Ljava/lang/Object;"));
-        let value = env
-            .get_field_unchecked(s, *value_field_id, ReturnType::Object)?
-            .l()?;
-        let result = match tag {
-            0 => {
-                let ok = Ok::try_from(Ok::Source::unbox(value, env), env)?;
-                core::result::Result::Ok(ok)
-            }
-            1 => {
-                let err = Err::try_from(Err::Source::unbox(value, env), env)?;
-                core::result::Result::Err(err)
-            }
-            _ => unreachable!(),
-        };
-        Ok(result)
-    }
-}
+pub(crate) use impl_tuple;

@@ -47,7 +47,7 @@ use jni::objects::{
     GlobalRef, JClass, JFieldID, JMethodID, JObject, JStaticFieldID, JStaticMethodID, JString,
     JValue,
 };
-use jni::signature::ReturnType;
+use jni::signature::{JavaType, ReturnType, TypeSignature};
 use jni::sys::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort};
 use jni::JNIEnv;
 use paste::paste;
@@ -60,7 +60,11 @@ pub use unchecked::*;
 mod config;
 pub mod field;
 pub mod safe;
+mod tuple;
 pub mod unchecked;
+
+#[cfg(feature = "jni_result")]
+mod result;
 
 /// A trait for types that are ffi-safe to use with JNI. It is implemented for primitives, [JObject](jni::objects::JObject) and [jobject](jni::sys::jobject).
 /// Users that want automatic conversion should instead implement [FromJavaValue], [IntoJavaValue] and/or [TryFromJavaValue], [TryIntoJavaValue]
@@ -82,13 +86,51 @@ pub trait JavaValue<'env> {
 pub trait Signature {
     /// [Java type signature](https://docs.oracle.com/en/java/javase/15/docs/specs/jni/types.html#type-signatures) for the implementing type.
     const SIG_TYPE: &'static str;
+
+    fn get_java_type() -> JavaType;
+    fn get_type_signature() -> TypeSignature;
+    fn get_return_type() -> ReturnType;
+}
+
+#[macro_export]
+macro_rules! impl_signature_get_methods {
+    () => {
+        fn get_java_type() -> JavaType {
+            static JAVA_TYPE: OnceLock<JavaType> = OnceLock::new();
+            JAVA_TYPE
+                .get_or_init(|| JavaType::from_str(<Self as Signature>::SIG_TYPE).unwrap())
+                .clone()
+        }
+        fn get_type_signature() -> TypeSignature {
+            static TYPE_SIGNATURE: OnceLock<TypeSignature> = OnceLock::new();
+            TYPE_SIGNATURE
+                .get_or_init(|| TypeSignature::from_str(<Self as Signature>::SIG_TYPE).unwrap())
+                .clone()
+        }
+        fn get_return_type() -> ReturnType {
+            static RETURN_TYPE: OnceLock<ReturnType> = OnceLock::new();
+
+            RETURN_TYPE
+                .get_or_init(|| ReturnType::from_str(<Self as Signature>::SIG_TYPE).unwrap())
+                .clone()
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_signature {
+
+    ($sig_type:expr, $type:ty $(,$lifetimes:lifetime)* $(,$generics:ident)* $(,)?) => {
+        impl<$($lifetimes),* $($generics: Signature),*> Signature for $type {
+            const SIG_TYPE: &'static str = $sig_type;
+            crate::impl_signature_get_methods!();
+        }
+    };
 }
 
 macro_rules! jvalue_types {
     ($type:ty: $boxed:ident ($sig:ident) [$unbox_method:ident]) => {
-        impl Signature for $type {
-            const SIG_TYPE: &'static str = stringify!($sig);
-        }
+        impl_signature!(stringify!($sig), $type);
 
         impl<'env> JavaValue<'env> for $type {
             fn autobox(self, env: &JNIEnv<'env>) -> JObject<'env> {
@@ -124,13 +166,17 @@ jvalue_types! {
     jshort: Short (S) [shortValue]
 }
 
+impl_signature!(<jchar as Signature>::SIG_TYPE, char);
+impl_signature!(<jboolean as Signature>::SIG_TYPE, bool);
+
 pub trait JClassAccess<'env>: Signature {
-    fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env>;
     fn init_global_class_ref(env: &JNIEnv<'env>) -> GlobalRef {
         let class_name = &<Self as Signature>::SIG_TYPE[1..<Self as Signature>::SIG_TYPE.len() - 1];
         let class = env.find_class(class_name).unwrap();
         env.new_global_ref(class).unwrap()
     }
+    fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env>;
+
     fn get_field_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JFieldID {
         env.get_field_id(Self::get_jclass(env), name, sig).unwrap()
     }
@@ -148,21 +194,48 @@ pub trait JClassAccess<'env>: Signature {
 }
 
 #[macro_export]
-macro_rules! generate_get_jclass {
-    () => {
-        fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env> {
-            static JCLASS_REF: OnceLock<GlobalRef> = OnceLock::new();
-            Into::into(
-                env.new_local_ref(JCLASS_REF.get_or_init(|| Self::init_global_class_ref(env)))
-                    .unwrap(),
-            )
+macro_rules! impl_jclass_access {
+    ($type:ty $(,$lifetimes:lifetime)* $(,$generics:ident)* $(,)?) => {
+        impl<'env $(,$lifetimes)* $(,$generics: Signature)*> JClassAccess<'env> for $type {
+            fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env> {
+                static JCLASS_REF: OnceLock<GlobalRef> = OnceLock::new();
+                Into::into(
+                    env.new_local_ref(JCLASS_REF.get_or_init(|| Self::init_global_class_ref(env)))
+                        .unwrap(),
+                )
+            }
         }
     };
 }
 
-impl Signature for () {
-    const SIG_TYPE: &'static str = "V";
+macro_rules! count_tuple_elements {
+    () => { 0 };
+    ($T:ident $(,$rest:ident)*) => { 1 + crate::convert::count_tuple_elements!($($rest),*) };
 }
+pub(crate) use count_tuple_elements;
+
+macro_rules! impl_tuple_signature {
+    ($sig_type:expr, $($T:ident),+ $(,)?) => {
+        crate::impl_signature!($sig_type, ($($T,)+), $($T,)+);
+        crate::impl_jclass_access!(($($T,)+), $($T,)+);
+    };
+}
+pub(crate) use impl_tuple_signature;
+
+macro_rules! impl_tuple_complete {
+    ($sig_type:expr, $(($T:ident, $t:ident, $idx:tt)),+) => {
+        crate::convert::impl_tuple_signature!($sig_type, $($T,)+);
+        crate::convert::safe::impl_tuple!($(($T, $t, $idx)),+);
+        crate::convert::unchecked::impl_tuple!($(($T, $t, $idx)),+);
+    };
+}
+pub(crate) use impl_tuple_complete;
+
+impl_signature!("V", ());
+
+impl_signature!("[Z", Box<[bool]>);
+
+impl_signature!("[B", Box<[u8]>);
 
 impl<'env> JavaValue<'env> for () {
     fn autobox(self, _env: &JNIEnv<'env>) -> JObject<'env> {
@@ -172,9 +245,8 @@ impl<'env> JavaValue<'env> for () {
     fn unbox(_s: JObject<'env>, _env: &JNIEnv<'env>) -> Self {}
 }
 
-impl<'env> Signature for JObject<'env> {
-    const SIG_TYPE: &'static str = "Ljava/lang/Object;";
-}
+impl_signature!("Ljava/lang/Object;", JObject<'env>, 'env);
+impl_jclass_access!(JObject<'env>);
 
 impl<'env> JavaValue<'env> for JObject<'env> {
     fn autobox(self, _env: &JNIEnv<'env>) -> JObject<'env> {
@@ -196,25 +268,11 @@ impl<'env> JavaValue<'env> for jobject {
     }
 }
 
-impl<'env> JClassAccess<'env> for JObject<'env> {
-    generate_get_jclass!();
-}
+impl_signature!("Ljava/lang/String;", String);
+impl_jclass_access!(String);
 
-impl Signature for String {
-    const SIG_TYPE: &'static str = "Ljava/lang/String;";
-}
-
-impl<'env> JClassAccess<'env> for String {
-    generate_get_jclass!();
-}
-
-impl<'env> Signature for JString<'env> {
-    const SIG_TYPE: &'static str = "Ljava/lang/String;";
-}
-
-impl<'env> JClassAccess<'env> for JString<'env> {
-    generate_get_jclass!();
-}
+impl_signature!("Ljava/lang/String;", JString<'env>, 'env);
+impl_jclass_access!(JString<'env>);
 
 impl<'env> JavaValue<'env> for JString<'env> {
     fn autobox(self, _env: &JNIEnv<'env>) -> JObject<'env> {
@@ -226,36 +284,19 @@ impl<'env> JavaValue<'env> for JString<'env> {
     }
 }
 
-impl<T: Signature> Signature for Vec<T> {
-    const SIG_TYPE: &'static str = "Ljava/util/ArrayList;";
-}
+impl_signature!("Ljava/util/ArrayList;", Vec<T>, T);
+impl_jclass_access!(Vec<T>, T);
 
-impl<'env, T: Signature> JClassAccess<'env> for Vec<T> {
-    generate_get_jclass!();
-}
+impl_signature!(<T as Signature>::SIG_TYPE, Option<T>, T);
 
-impl<T: Signature> Signature for jni::errors::Result<T> {
+impl_signature!(<T as Signature>::SIG_TYPE, jni::errors::Result<T>, T);
+
+impl<'env: 'borrow, 'borrow, T> Signature for Field<'env, 'borrow, T>
+where
+    T: Signature,
+{
     const SIG_TYPE: &'static str = <T as Signature>::SIG_TYPE;
-}
-
-impl<'env, T: Signature> Signature for Option<T> {
-    const SIG_TYPE: &'static str = T::SIG_TYPE;
-}
-
-impl<'env, Ok, Err> Signature for core::result::Result<Ok, Err>
-where
-    Ok: Signature,
-    Err: Signature,
-{
-    const SIG_TYPE: &'static str = config::RESULT_JNI_SIGNATURE;
-}
-
-impl<'env, Ok, Err> JClassAccess<'env> for core::result::Result<Ok, Err>
-where
-    Ok: Signature,
-    Err: Signature,
-{
-    generate_get_jclass!();
+    crate::impl_signature_get_methods!();
 }
 
 pub struct JValueWrapper<'a>(pub JValue<'a>);

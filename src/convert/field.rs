@@ -148,10 +148,3 @@ where
         }
     }
 }
-
-impl<'env: 'borrow, 'borrow, T> Signature for Field<'env, 'borrow, T>
-where
-    T: Signature,
-{
-    const SIG_TYPE: &'static str = <T as Signature>::SIG_TYPE;
-}
