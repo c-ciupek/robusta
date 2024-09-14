@@ -87,9 +87,16 @@ pub trait Signature {
     /// [Java type signature](https://docs.oracle.com/en/java/javase/15/docs/specs/jni/types.html#type-signatures) for the implementing type.
     const SIG_TYPE: &'static str;
 
-    fn get_java_type() -> JavaType;
-    fn get_type_signature() -> TypeSignature;
-    fn get_return_type() -> ReturnType;
+    // default implementation of get functions
+    fn get_java_type() -> JavaType {
+        JavaType::from_str(<Self as Signature>::SIG_TYPE).unwrap()
+    }
+    fn get_type_signature() -> TypeSignature {
+        TypeSignature::from_str(<Self as Signature>::SIG_TYPE).unwrap()
+    }
+    fn get_return_type() -> ReturnType {
+        ReturnType::from_str(<Self as Signature>::SIG_TYPE).unwrap()
+    }
 }
 
 #[macro_export]
@@ -102,6 +109,7 @@ macro_rules! impl_signature {
         }
     };
 
+    // implementation with cache of get functions
     (func) => {
         fn get_java_type() -> JavaType {
             static JAVA_TYPE: OnceLock<JavaType> = OnceLock::new();
@@ -204,29 +212,6 @@ macro_rules! impl_jclass_access {
         }
     };
 }
-
-macro_rules! count_tuple_elements {
-    () => { 0 };
-    ($T:ident $(,$rest:ident)*) => { 1 + crate::convert::count_tuple_elements!($($rest),*) };
-}
-pub(crate) use count_tuple_elements;
-
-macro_rules! impl_tuple_signature {
-    ($sig_type:expr, $($T:ident),+ $(,)?) => {
-        crate::impl_signature!($sig_type, ($($T,)+), $($T,)+);
-        crate::impl_jclass_access!(($($T,)+), $($T,)+);
-    };
-}
-pub(crate) use impl_tuple_signature;
-
-macro_rules! impl_tuple_complete {
-    ($sig_type:expr, $(($T:ident, $t:ident, $idx:tt)),+ $(,)?) => {
-        crate::convert::impl_tuple_signature!($sig_type, $($T,)+);
-        crate::convert::safe::impl_tuple!($(($T, $t, $idx)),+);
-        crate::convert::unchecked::impl_tuple!($(($T, $t, $idx)),+);
-    };
-}
-pub(crate) use impl_tuple_complete;
 
 impl_signature!("V", ());
 
