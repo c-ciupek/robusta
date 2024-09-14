@@ -605,16 +605,20 @@ impl Fold for JNISignatureTransformer {
                 }
                 #[cfg(feature = "jni_tuple")]
                 (Type::Tuple(TypeTuple { elems, .. }), CallType::Unchecked { .. }) => {
+                    let elems_iter = elems.iter();
                     ReturnType::Type(
                         *arrow,
-                        parse_quote_spanned! { elems.span() => <(#(#elems),*) as ::robusta_jni::convert::IntoJavaValue<'env>>::Target },
+                        parse_quote_spanned! { elems.span() => <(#(#elems_iter),*) as ::robusta_jni::convert::IntoJavaValue<'env>>::Target },
                     )
                 }
                 #[cfg(feature = "jni_tuple")]
-                (Type::Tuple(TypeTuple { elems, .. }), CallType::Safe(_)) => ReturnType::Type(
-                    *arrow,
-                    parse_quote_spanned! { elems.span() => <(#(#elems),*) as ::robusta_jni::convert::TryIntoJavaValue<'env>>::Target },
-                ),
+                (Type::Tuple(TypeTuple { elems, .. }), CallType::Safe(_)) => {
+                    let elems_iter = elems.iter();
+                    ReturnType::Type(
+                        *arrow,
+                        parse_quote_spanned! { elems.span() => <(#(#elems_iter),*) as ::robusta_jni::convert::TryIntoJavaValue<'env>>::Target },
+                    )
+                }
                 _ => {
                     emit_error!(return_type, "Only type or type paths are permitted as type ascriptions in function params");
                     return_type
