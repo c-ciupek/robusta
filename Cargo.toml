@@ -14,7 +14,7 @@ documentation = "https://docs.rs/robusta/"
 
 [features]
 jni_result = []
-jni_tuple = []
+jni_tuple = ["robusta-codegen/jni_tuple"]
 
 [dependencies]
 robusta-codegen = { version = "0.2", path = "./robusta-codegen" }
