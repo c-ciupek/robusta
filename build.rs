@@ -30,7 +30,7 @@ fn set_result_jni_config(config_str: &mut String) {
 struct TupleConfig();
 
 impl TupleConfig {
-    const SIGNATURE_ENV: &str = "TUPLE_JNI_BASE_PATH";
+    const SIGNATURE_ENV: &str = "TUPLE_JNI_PREFIX";
     const IMPL_STRING_ENV: &str = "TUPLE_IMPL_STRING";
 
     fn parse_tuple_impl_string(impl_string: &str) -> Vec<usize> {
@@ -44,8 +44,8 @@ impl TupleConfig {
         dim_vec
     }
 
-    fn get_tuple_sig(base_path: &str, dim: usize) -> String {
-        format!("L{}Tuple{};", base_path, dim)
+    fn get_tuple_sig(jni_prefix: &str, dim: usize) -> String {
+        format!("{}Tuple{};", jni_prefix, dim)
     }
 
     fn get_tuple_macro_param(dim: usize) -> String {
@@ -55,11 +55,11 @@ impl TupleConfig {
     }
 
     pub fn create_impl_tuple_macros(config_str: &mut String) {
-        let tuple_jni_base_path = env::var(Self::SIGNATURE_ENV).unwrap_or_else(|_| "".to_string());
+        let tuple_jni_prefix = env::var(Self::SIGNATURE_ENV).unwrap_or_else(|_| "L".to_string());
 
         // by default create tuple 1 to 12
         let tuple_impl_string = env::var(Self::IMPL_STRING_ENV)
-            .unwrap_or_else(|_| "1,2,3,4,5,6,7,8,9,10,11,12".to_string());
+            .unwrap_or_else(|_| "0,1,2,3,4,5,6,7,8,9,10,11,12".to_string());
 
         let impl_tuple_vec = Self::parse_tuple_impl_string(&tuple_impl_string);
 
@@ -68,7 +68,7 @@ impl TupleConfig {
         for dim in impl_tuple_vec.iter() {
             tuple_macro_calls.push_str(&format!(
                 "\t\timpl_tuple_complete!(\"{}\", {});\n",
-                Self::get_tuple_sig(&tuple_jni_base_path, *dim),
+                Self::get_tuple_sig(&tuple_jni_prefix, *dim),
                 Self::get_tuple_macro_param(*dim)
             ));
         }

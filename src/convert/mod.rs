@@ -219,6 +219,7 @@ impl_signature!("[Z", Box<[bool]>);
 
 impl_signature!("[B", Box<[u8]>);
 
+#[cfg(notfeature = "jni_tuple")]
 impl<'env> JavaValue<'env> for () {
     fn autobox(self, _env: &JNIEnv<'env>) -> JObject<'env> {
         panic!("called `JavaValue::autobox` on unit value")
