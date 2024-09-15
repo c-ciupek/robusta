@@ -166,62 +166,6 @@ macro_rules! impl_tuple_conversion_tuple0 {
 
             fn unbox(_s: JObject<'env>, _env: &JNIEnv<'env>) -> Self {}
         }
-
-        // impl<'env> TryIntoJavaValue<'env> for () {
-        //     type Target = JObject<'env>;
-
-        //     fn try_into(self, env: &JNIEnv<'env>) -> Result<Self::Target> {
-        //         static STATIC_FIELD_ID: OnceLock<JStaticFieldID> = OnceLock::new();
-        //         let static_field_id = STATIC_FIELD_ID.get_or_init(|| {
-        //             Self::get_static_field_id(env, "INSTANCE", <Self as Signature>::SIG_TYPE)
-        //         });
-
-        //         let instance = env
-        //             .get_static_field_unchecked(
-        //                 Self::get_jclass(env),
-        //                 *static_field_id,
-        //                 Self::get_java_type(),
-        //             )?
-        //             .l()?;
-        //         Ok(instance)
-        //     }
-        // }
-
-        // impl<'env: 'borrow, 'borrow> TryFromJavaValue<'env, 'borrow> for () {
-        //     type Source = JObject<'env>;
-
-        //     fn try_from(_s: Self::Source, _env: &'borrow JNIEnv<'env>) -> Result<Self> {
-        //         Ok(())
-        //     }
-        // }
-
-        // impl<'env> IntoJavaValue<'env> for () {
-        //     type Target = JObject<'env>;
-
-        //     fn into(self, env: &JNIEnv<'env>) -> Self::Target {
-        //         static STATIC_FIELD_ID: OnceLock<JStaticFieldID> = OnceLock::new();
-        //         let static_field_id = STATIC_FIELD_ID.get_or_init(|| {
-        //             Self::get_static_field_id(env, "INSTANCE", <Self as Signature>::SIG_TYPE)
-        //         });
-
-        //         env.get_static_field_unchecked(
-        //             Self::get_jclass(env),
-        //             *static_field_id,
-        //             Self::get_java_type(),
-        //         )
-        //         .unwrap()
-        //         .l()
-        //         .unwrap()
-        //     }
-        // }
-
-        // impl<'env: 'borrow, 'borrow> FromJavaValue<'env, 'borrow> for () {
-        //     type Source = JObject<'env>;
-
-        //     fn from(_s: Self::Source, _env: &'borrow JNIEnv<'env>) -> Self {
-        //         ()
-        //     }
-        // }
     };
 }
 

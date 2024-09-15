@@ -45,7 +45,7 @@ impl TupleConfig {
     }
 
     fn get_tuple_sig(jni_prefix: &str, dim: usize) -> String {
-        format!("{}Tuple{};", jni_prefix, dim)
+        format!("{}{};", jni_prefix, dim)
     }
 
     fn get_tuple_macro_param(dim: usize) -> String {
@@ -55,7 +55,8 @@ impl TupleConfig {
     }
 
     pub fn create_impl_tuple_macros(config_str: &mut String) {
-        let tuple_jni_prefix = env::var(Self::SIGNATURE_ENV).unwrap_or_else(|_| "L".to_string());
+        let tuple_jni_prefix =
+            env::var(Self::SIGNATURE_ENV).unwrap_or_else(|_| "LTuple".to_string());
 
         // by default create tuple 1 to 12
         let tuple_impl_string = env::var(Self::IMPL_STRING_ENV)
