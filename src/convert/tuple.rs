@@ -69,12 +69,11 @@ macro_rules! impl_tuple_conversion {
                 $(
                     let $t = {
                         static FIELD_ID: OnceLock<JFieldID> = OnceLock::new();
-                        println!("filed_name: {}, signature:  {}", stringify!($t), <$T as Signature>::SIG_TYPE);
-                        let field_id = FIELD_ID.get_or_init(|| Self::get_field_id(env, stringify!($t), <$T as Signature>::SIG_TYPE));
+                        let field_id = FIELD_ID.get_or_init(|| Self::get_field_id(env, stringify!($t), "Ljava/lang/Object;"));
 
                         $T::try_from(
                             $T::Source::unbox(
-                                env.get_field_unchecked(s, *field_id, Self::get_return_type())?.l()?,
+                                env.get_field_unchecked(s, *field_id, ReturnType::Object)?.l()?,
                                 env,
                             ),
                             env,
