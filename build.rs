@@ -58,9 +58,12 @@ impl TupleConfig {
         let tuple_jni_prefix =
             env::var(Self::SIGNATURE_ENV).unwrap_or_else(|_| "LTuple".to_string());
 
-        // by default create tuple 1 to 12
-        let tuple_impl_string = env::var(Self::IMPL_STRING_ENV)
+        // by default create tuple 0 to 12
+        let mut tuple_impl_string = env::var(Self::IMPL_STRING_ENV)
             .unwrap_or_else(|_| "0,1,2,3,4,5,6,7,8,9,10,11,12".to_string());
+
+        // always include 0
+        tuple_impl_string.push_str(",0");
 
         let impl_tuple_vec = Self::parse_tuple_impl_string(&tuple_impl_string);
 
