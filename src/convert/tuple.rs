@@ -123,11 +123,11 @@ macro_rules! impl_tuple_conversion {
                 $(
                     let $t = {
                         static FIELD_ID: OnceLock<JFieldID> = OnceLock::new();
-                        let field_id = FIELD_ID.get_or_init(|| Self::get_field_id(env, stringify!($t), <$T as Signature>::SIG_TYPE));
+                        let field_id = FIELD_ID.get_or_init(|| Self::get_field_id(env, stringify!($t), "Ljava/lang/Object;"));
 
                         $T::from(
                             $T::Source::unbox(
-                                env.get_field_unchecked(s, *field_id, Self::get_return_type()).unwrap().l().unwrap(),
+                                env.get_field_unchecked(s, *field_id, ReturnType::Object).unwrap().l().unwrap(),
                                 env,
                             ),
                             env,
@@ -141,30 +141,33 @@ macro_rules! impl_tuple_conversion {
     };
 }
 
-macro_rules! impl_tuple_conversion_tuple0 {
-    () => {
-        impl<'env> JavaValue<'env> for () {
-            fn autobox(self, env: &JNIEnv<'env>) -> JObject<'env> {
-                static STATIC_FIELD_ID: OnceLock<JStaticFieldID> = OnceLock::new();
-                let static_field_id = STATIC_FIELD_ID.get_or_init(|| {
-                    JavaTuple0::get_static_field_id(
-                        env,
-                        "INSTANCE",
-                        <JavaTuple0 as Signature>::SIG_TYPE,
-                    )
-                });
+macro_rules! impl_tuple_tuple0 {
+    ($sig_type:expr) => {
+        struct JavaTuple0();
+        impl_signature!($sig_type, JavaTuple0);
+        impl_jclass_access!(JavaTuple0);
 
-                env.get_static_field_unchecked(
-                    JavaTuple0::get_jclass(env),
-                    *static_field_id,
-                    JavaTuple0::get_java_type(),
+        fn autobox_tuple0<'env>(env: &JNIEnv<'env>) -> JObject<'env> {
+            // set autobox tuple0 to true
+            IS_AUTOBOX_TUPLE0.get_or_init(|| true);
+
+            static STATIC_FIELD_ID: OnceLock<JStaticFieldID> = OnceLock::new();
+            let static_field_id = STATIC_FIELD_ID.get_or_init(|| {
+                JavaTuple0::get_static_field_id(
+                    env,
+                    "INSTANCE",
+                    <JavaTuple0 as Signature>::SIG_TYPE,
                 )
-                .unwrap()
-                .l()
-                .unwrap()
-            }
+            });
 
-            fn unbox(_s: JObject<'env>, _env: &JNIEnv<'env>) -> Self {}
+            env.get_static_field_unchecked(
+                JavaTuple0::get_jclass(env),
+                *static_field_id,
+                JavaTuple0::get_java_type(),
+            )
+            .unwrap()
+            .l()
+            .unwrap()
         }
     };
 }
@@ -172,10 +175,7 @@ macro_rules! impl_tuple_conversion_tuple0 {
 macro_rules! impl_tuple_complete {
 
     ($sig_type:expr $(,)?) => {
-        struct JavaTuple0();
-        impl_signature!($sig_type, JavaTuple0);
-        impl_jclass_access!(JavaTuple0);
-        impl_tuple_conversion_tuple0!();
+        impl_tuple_tuple0!($sig_type);
     };
 
     ($sig_type:expr, $(($T:ident, $t:ident, $idx:tt)),+ $(,)?) => {
@@ -184,5 +184,20 @@ macro_rules! impl_tuple_complete {
     };
 }
 
+static IS_AUTOBOX_TUPLE0: OnceLock<bool> = OnceLock::new();
+
 // call macro for implementing all tuples specified in build
 crate::convert::config::impl_all_tuples!();
+
+// impl different autobox if tuple 0 exists
+impl<'env> JavaValue<'env> for () {
+    fn autobox(self, env: &JNIEnv<'env>) -> JObject<'env> {
+        if *IS_AUTOBOX_TUPLE0.get_or_init(|| false) {
+            autobox_tuple0(env)
+        } else {
+            panic!("called `JavaValue::autobox` on unit value")
+        }
+    }
+
+    fn unbox(_s: JObject<'env>, _env: &JNIEnv<'env>) -> Self {}
+}
