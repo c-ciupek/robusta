@@ -196,21 +196,6 @@ macro_rules! jvalue_types {
         impl_signature!(stringify!($sig), $type);
         impl_jclass_access!($type);
 
-        // impl<'env> JavaValue<'env> for $type {
-        //     fn autobox(self, env: &JNIEnv<'env>) -> JObject<'env> {
-        //         env.call_static_method_unchecked(concat!("java/lang/", stringify!($boxed)),
-        //             (concat!("java/lang/", stringify!($boxed)), "valueOf", concat!(stringify!(($sig)), "Ljava/lang/", stringify!($boxed), ";")),
-        //             ReturnType::from_str(concat!("Ljava/lang/", stringify!($boxed), ";")).unwrap(),
-        //             &[JValue::from(self).to_jni()]).unwrap().l().unwrap()
-        //     }
-
-        //     fn unbox(s: JObject<'env>, env: &JNIEnv<'env>) -> Self {
-        //         paste!(Into::into(env.call_method_unchecked(s, (concat!("java/lang/", stringify!($boxed)), stringify!($unbox_method), concat!("()", stringify!($sig))), ReturnType::from_str(stringify!($sig)).unwrap(), &[])
-        //             .unwrap().[<$sig:lower>]()
-        //             .unwrap()))
-        //     }
-        // }
-
         impl<'env> JavaValue<'env> for $type {
             fn autobox(self, env: &JNIEnv<'env>) -> JObject<'env> {
                 static METHOD_ID: OnceLock<JStaticMethodID> = OnceLock::new();
