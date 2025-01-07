@@ -30,8 +30,8 @@ fn set_result_jni_config(config_str: &mut String) {
 struct TupleConfig();
 
 impl TupleConfig {
-    const SIGNATURE_ENV: &str = "TUPLE_JNI_PREFIX";
-    const IMPL_STRING_ENV: &str = "TUPLE_IMPL_STRING";
+    const SIGNATURE_ENV: &'static str = "TUPLE_JNI_PREFIX";
+    const IMPL_STRING_ENV: &'static str = "TUPLE_IMPL_STRING";
 
     fn parse_tuple_impl_string(impl_string: &str) -> Vec<usize> {
         let dim_set: HashSet<usize> = impl_string

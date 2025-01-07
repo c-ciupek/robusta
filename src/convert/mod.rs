@@ -99,6 +99,49 @@ pub trait Signature {
     }
 }
 
+pub trait JClassAccess<'env>: Signature {
+    fn class_name() -> &'static str {
+        let raw_sig = Self::SIG_TYPE;
+
+        if raw_sig.starts_with('L') && raw_sig.ends_with(';') {
+            &raw_sig[1..raw_sig.len() - 1]
+        } else {
+            match raw_sig {
+                "Z" => "java/lang/Boolean",
+                "B" => "java/lang/Byte",
+                "C" => "java/lang/Character",
+                "S" => "java/lang/Short",
+                "I" => "java/lang/Integer",
+                "J" => "java/lang/Long",
+                "F" => "java/lang/Float",
+                "D" => "java/lang/Double",
+                _ => panic!("Unsupported signature for find_class: {}", raw_sig),
+            }
+        }
+    }
+    fn init_global_class_ref(env: &JNIEnv<'env>) -> GlobalRef {
+        let class_name = Self::class_name();
+        let class = env.find_class(class_name).unwrap();
+        env.new_global_ref(class).unwrap()
+    }
+    fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env>;
+
+    fn get_field_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JFieldID {
+        env.get_field_id(Self::get_jclass(env), name, sig).unwrap()
+    }
+    fn get_static_field_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JStaticFieldID {
+        env.get_static_field_id(Self::get_jclass(env), name, sig)
+            .unwrap()
+    }
+    fn get_method_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JMethodID {
+        env.get_method_id(Self::get_jclass(env), name, sig).unwrap()
+    }
+    fn get_static_method_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JStaticMethodID {
+        env.get_static_method_id(Self::get_jclass(env), name, sig)
+            .unwrap()
+    }
+}
+
 #[macro_export]
 macro_rules! impl_signature {
 
@@ -133,24 +176,84 @@ macro_rules! impl_signature {
     };
 }
 
+#[macro_export]
+macro_rules! impl_jclass_access {
+    ($type:ty $(,$lifetimes:lifetime)* $(,$generics:ident)* $(,)?) => {
+        impl<'env $(,$lifetimes)* $(,$generics: Signature)*> JClassAccess<'env> for $type {
+            fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env> {
+                static JCLASS_REF: OnceLock<GlobalRef> = OnceLock::new();
+                Into::into(
+                    env.new_local_ref(JCLASS_REF.get_or_init(|| Self::init_global_class_ref(env)))
+                        .unwrap(),
+                )
+            }
+        }
+    };
+}
+
 macro_rules! jvalue_types {
     ($type:ty: $boxed:ident ($sig:ident) [$unbox_method:ident]) => {
         impl_signature!(stringify!($sig), $type);
+        impl_jclass_access!($type);
+
+        // impl<'env> JavaValue<'env> for $type {
+        //     fn autobox(self, env: &JNIEnv<'env>) -> JObject<'env> {
+        //         env.call_static_method_unchecked(concat!("java/lang/", stringify!($boxed)),
+        //             (concat!("java/lang/", stringify!($boxed)), "valueOf", concat!(stringify!(($sig)), "Ljava/lang/", stringify!($boxed), ";")),
+        //             ReturnType::from_str(concat!("Ljava/lang/", stringify!($boxed), ";")).unwrap(),
+        //             &[JValue::from(self).to_jni()]).unwrap().l().unwrap()
+        //     }
+
+        //     fn unbox(s: JObject<'env>, env: &JNIEnv<'env>) -> Self {
+        //         paste!(Into::into(env.call_method_unchecked(s, (concat!("java/lang/", stringify!($boxed)), stringify!($unbox_method), concat!("()", stringify!($sig))), ReturnType::from_str(stringify!($sig)).unwrap(), &[])
+        //             .unwrap().[<$sig:lower>]()
+        //             .unwrap()))
+        //     }
+        // }
 
         impl<'env> JavaValue<'env> for $type {
             fn autobox(self, env: &JNIEnv<'env>) -> JObject<'env> {
-                env.call_static_method_unchecked(concat!("java/lang/", stringify!($boxed)),
-                    (concat!("java/lang/", stringify!($boxed)), "valueOf", concat!(stringify!(($sig)), "Ljava/lang/", stringify!($boxed), ";")),
-                    ReturnType::from_str(concat!("Ljava/lang/", stringify!($boxed), ";")).unwrap(),
-                    &[JValue::from(self).to_jni()]).unwrap().l().unwrap()
+                static METHOD_ID: OnceLock<JStaticMethodID> = OnceLock::new();
+                let value_of_id = METHOD_ID.get_or_init(|| {
+                    <$type as JClassAccess>::get_static_method_id(
+                        env,
+                        "valueOf",
+                        concat!("(", stringify!($sig), ")Ljava/lang/", stringify!($boxed), ";"),
+                    )
+                });
+
+                // Call e.g. Integer.valueOf(int)
+                env.call_static_method_unchecked(
+                    <$type as JClassAccess>::get_jclass(env),
+                    *value_of_id,
+                    ReturnType::Object,
+                    &[JValue::from(self).to_jni()],
+                )
+                .unwrap()
+                .l()
+                .unwrap()
             }
 
-            fn unbox(s: JObject<'env>, env: &JNIEnv<'env>) -> Self {
-                paste!(Into::into(env.call_method_unchecked(s, (concat!("java/lang/", stringify!($boxed)), stringify!($unbox_method), concat!("()", stringify!($sig))), ReturnType::from_str(stringify!($sig)).unwrap(), &[])
-                    .unwrap().[<$sig:lower>]()
-                    .unwrap()))
+            fn unbox(obj: JObject<'env>, env: &JNIEnv<'env>) -> Self {
+                // Get MethodID for e.g. "intValue()I"
+                static METHOD_ID: OnceLock<JMethodID> = OnceLock::new();
+                let unbox_id = METHOD_ID.get_or_init(|| {
+                    <$type as JClassAccess>::get_method_id(
+                        env,
+                        stringify!($unbox_method),
+                        concat!("()", stringify!($sig)),
+                    )
+                });
+
+                paste! {
+                    Into::into(env.call_method_unchecked(obj, *unbox_id, <$type as Signature>::get_return_type(), &[])
+                        .unwrap()
+                        .[<$sig:lower>]()
+                        .unwrap())
+                }
             }
         }
+
     };
 
     ($type:ty: $boxed:ident ($sig:ident) [$unbox_method:ident], $($rest:ty: $rest_boxed:ident ($rest_sig:ident) [$unbox_method_rest:ident]),+) => {
@@ -173,45 +276,6 @@ jvalue_types! {
 
 impl_signature!(<jchar as Signature>::SIG_TYPE, char);
 impl_signature!(<jboolean as Signature>::SIG_TYPE, bool);
-
-pub trait JClassAccess<'env>: Signature {
-    fn init_global_class_ref(env: &JNIEnv<'env>) -> GlobalRef {
-        let class_name = &<Self as Signature>::SIG_TYPE[1..<Self as Signature>::SIG_TYPE.len() - 1];
-        let class = env.find_class(class_name).unwrap();
-        env.new_global_ref(class).unwrap()
-    }
-    fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env>;
-
-    fn get_field_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JFieldID {
-        env.get_field_id(Self::get_jclass(env), name, sig).unwrap()
-    }
-    fn get_static_field_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JStaticFieldID {
-        env.get_static_field_id(Self::get_jclass(env), name, sig)
-            .unwrap()
-    }
-    fn get_method_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JMethodID {
-        env.get_method_id(Self::get_jclass(env), name, sig).unwrap()
-    }
-    fn get_static_method_id(env: &JNIEnv<'env>, name: &str, sig: &str) -> JStaticMethodID {
-        env.get_static_method_id(Self::get_jclass(env), name, sig)
-            .unwrap()
-    }
-}
-
-#[macro_export]
-macro_rules! impl_jclass_access {
-    ($type:ty $(,$lifetimes:lifetime)* $(,$generics:ident)* $(,)?) => {
-        impl<'env $(,$lifetimes)* $(,$generics: Signature)*> JClassAccess<'env> for $type {
-            fn get_jclass(env: &JNIEnv<'env>) -> JClass<'env> {
-                static JCLASS_REF: OnceLock<GlobalRef> = OnceLock::new();
-                Into::into(
-                    env.new_local_ref(JCLASS_REF.get_or_init(|| Self::init_global_class_ref(env)))
-                        .unwrap(),
-                )
-            }
-        }
-    };
-}
 
 impl_signature!("V", ());
 
